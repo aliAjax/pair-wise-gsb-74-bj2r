@@ -2,10 +2,12 @@ import axios, { type AxiosAdapter } from 'axios'
 import type {
   DownstreamDependency,
   EventDefinition,
+  EventMerge,
   ReleaseCandidate,
   ValidationIssue,
 } from '@/models/domain'
 import { loadState } from '@/services/repository'
+import { mergeSuggestions } from '@/services/eventMerge'
 import { validateGovernance } from '@/services/selectors'
 
 export interface EventListFilters {
@@ -15,12 +17,20 @@ export interface EventListFilters {
   category?: string
 }
 
+export interface MergesPayload {
+  merges: EventMerge[]
+  suggestions: ReturnType<typeof mergeSuggestions>
+}
+
 export interface DashboardPayload {
   eventCount: number
   activeEventCount: number
   draftEventCount: number
   dependencyCount: number
   pendingMigrations: number
+  pendingMerges: number
+  blockedMerges: number
+  validatingMerges: number
   validationIssueCount: number
   criticalIssueCount: number
   currentRelease: ReleaseCandidate | null
@@ -50,6 +60,11 @@ const localAdapter: AxiosAdapter = async (config) => {
       dependencyCount: state.dependencies.length,
       pendingMigrations:
         currentRelease?.migrationConfirmations.filter((item) => item.status === 'pending').length ?? 0,
+      pendingMerges: state.merges.filter((item) => item.status === 'pending').length,
+      blockedMerges: state.merges.filter(
+        (item) => ['draft', 'pending'].includes(item.status) && item.blockers.length > 0,
+      ).length,
+      validatingMerges: state.merges.filter((item) => item.status === 'confirming').length,
       validationIssueCount: issues.length,
       criticalIssueCount: issues.filter((issue) => issue.severity === 'critical').length,
       currentRelease,
@@ -129,6 +144,20 @@ const localAdapter: AxiosAdapter = async (config) => {
     }
   }
 
+  if (url === '/merges') {
+    const data: MergesPayload = {
+      merges: state.merges,
+      suggestions: mergeSuggestions(state),
+    }
+    return {
+      data,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }
+  }
+
   if (url === '/validations') {
     const data: ValidationIssue[] = validateGovernance(state)
     return {
@@ -186,6 +215,10 @@ export const governanceApi = {
   },
   listValidations: async (): Promise<ValidationIssue[]> => {
     const response = await http.get<ValidationIssue[]>('/validations')
+    return response.data
+  },
+  listMerges: async (): Promise<MergesPayload> => {
+    const response = await http.get<MergesPayload>('/merges')
     return response.data
   },
   getLineage: async (): Promise<LineagePayload> => {

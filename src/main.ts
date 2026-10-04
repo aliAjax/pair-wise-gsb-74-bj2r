@@ -6,20 +6,11 @@ import 'tdesign-vue-next/es/style/index.css'
 import './styles/global.css'
 import App from './App.vue'
 import router from './router'
+import { queryClient } from './services/queryClient'
 
 createApp(App)
   .use(createPinia())
   .use(router)
-  .use(VueQueryPlugin, {
-    queryClientConfig: {
-      defaultOptions: {
-        queries: {
-          staleTime: 10_000,
-          retry: 1,
-          refetchOnWindowFocus: false,
-        },
-      },
-    },
-  })
+  .use(VueQueryPlugin, { queryClient })
   .use(TDesign)
   .mount('#app')

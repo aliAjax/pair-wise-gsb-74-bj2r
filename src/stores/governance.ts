@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type {
   DeprecationPlan,
   EventDefinition,
+  EventMerge,
   EventProperty,
   GovernanceState,
   PlatformRule,
@@ -10,17 +11,38 @@ import type {
   ReleaseCandidate,
   RollbackRecord,
 } from '@/models/domain'
-import { createId, loadState, resetState, saveState } from '@/services/repository'
+import { createId, loadState, onExternalStateChange, resetState, saveState } from '@/services/repository'
 import {
   affectedDependencies,
   contractDifferences,
   releaseReadiness,
   validateGovernance,
 } from '@/services/selectors'
+import * as reducer from '@/services/eventMergeReducer'
+import { StaleMergeVersionError } from '@/services/eventMergeReducer'
+import { queryClient } from '@/services/queryClient'
+
+const invalidateMergeQueries = (): void => {
+  void queryClient.invalidateQueries({ queryKey: ['merges'] })
+  void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+  void queryClient.invalidateQueries({ queryKey: ['lineage'] })
+  void queryClient.invalidateQueries({ queryKey: ['events'] })
+}
+
+export { StaleMergeVersionError }
 
 export const useGovernanceStore = defineStore('governance', () => {
   const data = ref<GovernanceState>(loadState())
   const lastSavedAt = ref(new Date().toISOString())
+
+  // 另一窗口提交/撤销后，本窗口重新装载状态，后到方提交时按版本号判冲突
+  onExternalStateChange(() => {
+    const latest = loadState()
+    if (JSON.stringify(latest.merges) !== JSON.stringify(data.value.merges)) {
+      data.value = latest
+      lastSavedAt.value = new Date().toISOString()
+    }
+  })
 
   const issues = computed(() => validateGovernance(data.value))
 
@@ -249,9 +271,140 @@ export const useGovernanceStore = defineStore('governance', () => {
     persist()
   }
 
+  // ============ 可撤销的事件合并（状态迁移委托给框架无关 reducer） ============
+
+  const startMerge = (
+    masterEventId: string,
+    sourceEventId: string,
+    reason: string,
+  ): EventMerge => {
+    const merge = reducer.startMerge(
+      data.value,
+      masterEventId,
+      sourceEventId,
+      reason,
+      new Date().toISOString(),
+    )
+    audit(
+      'event_merge',
+      merge.id,
+      '创建事件合并',
+      `主事件 ${masterEventId} 合并 ${sourceEventId}，生成 ${merge.mappings.length} 条字段映射`,
+    )
+    persist()
+    invalidateMergeQueries()
+    return merge
+  }
+
+  const updateMergeMapping = (
+    mergeId: string,
+    expectedVersion: number,
+    mappingId: string,
+    patch: Parameters<typeof reducer.updateMergeMapping>[4],
+  ): void => {
+    const merge = reducer.updateMergeMapping(
+      data.value,
+      mergeId,
+      expectedVersion,
+      mappingId,
+      patch,
+    )
+    audit('event_merge', merge.id, '调整字段映射', mappingId)
+    persist()
+    invalidateMergeQueries()
+  }
+
+  const submitMerge = (mergeId: string, expectedVersion: number): void => {
+    const merge = reducer.submitMerge(data.value, mergeId, expectedVersion)
+    audit(
+      'event_merge',
+      merge.id,
+      '提交合并评审',
+      `合并进入待处理看板，共 ${merge.mappings.length} 条映射`,
+    )
+    persist()
+    invalidateMergeQueries()
+  }
+
+  const confirmMerge = (
+    mergeId: string,
+    expectedVersion: number,
+    options?: Parameters<typeof reducer.confirmMerge>[4],
+  ): void => {
+    const merge = reducer.confirmMerge(
+      data.value,
+      mergeId,
+      expectedVersion,
+      new Date().toISOString(),
+      options,
+    )
+    if (merge.status === 'confirmed') {
+      audit('event_merge', merge.id, '确认事件合并', '看板与查询已改读主事件，旧键保留为别名')
+    }
+    persist()
+    invalidateMergeQueries()
+  }
+
+  const cancelMerge = (mergeId: string, expectedVersion: number): void => {
+    const merge = reducer.cancelMerge(
+      data.value,
+      mergeId,
+      expectedVersion,
+      new Date().toISOString(),
+    )
+    audit('event_merge', merge.id, '撤销合并申请', '合并未生效，字段映射留档')
+    persist()
+    invalidateMergeQueries()
+  }
+
+  /** 对账不平后恢复合并前引用，差异与历史映射保留在记录中 */
+  const undoMerge = (mergeId: string, expectedVersion: number, reason: string): void => {
+    const merge = reducer.undoMerge(
+      data.value,
+      mergeId,
+      expectedVersion,
+      reason,
+      new Date().toISOString(),
+    )
+    audit(
+      'event_merge',
+      merge.id,
+      '恢复合并前引用',
+      `对账不平已回滚：${reason}；历史字段映射保留 ${merge.mappings.length} 条`,
+    )
+    persist()
+    invalidateMergeQueries()
+  }
+
+  const reconcileMerge = (
+    mergeId: string,
+    expectedVersion: number,
+    observedRefs: number,
+    note: string,
+  ): NonNullable<EventMerge['reconciliation']> => {
+    const result = reducer.reconcileMerge(
+      data.value,
+      mergeId,
+      expectedVersion,
+      observedRefs,
+      note,
+      new Date().toISOString(),
+    )
+    audit(
+      'event_merge',
+      mergeId,
+      '合并对账',
+      `期望引用 ${result.expectedRefs} / 看板实际 ${observedRefs}：${result.balanced ? '平衡' : '不平，差异已留档'}`,
+    )
+    persist()
+    invalidateMergeQueries()
+    return result
+  }
+
   const resetDemo = (): void => {
     data.value = resetState()
     lastSavedAt.value = new Date().toISOString()
+    invalidateMergeQueries()
   }
 
   const exportContract = (eventIds?: string[]): string => {
@@ -303,6 +456,13 @@ export const useGovernanceStore = defineStore('governance', () => {
     saveDeprecation,
     executeRollback,
     verifyRollback,
+    startMerge,
+    updateMergeMapping,
+    submitMerge,
+    confirmMerge,
+    cancelMerge,
+    undoMerge,
+    reconcileMerge,
     resetDemo,
     exportContract,
   }

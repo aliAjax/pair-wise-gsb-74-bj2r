@@ -53,6 +53,16 @@ const pendingApprovals = computed(
         <div class="metric-value">{{ dashboard?.eventCount ?? store.data.events.length }}</div>
         <div class="metric-note">{{ dashboard?.draftEventCount ?? 0 }} 个草稿或评审中</div>
       </div>
+      <RouterLink to="/merges" class="metric metric-link">
+        <div class="metric-label">事件合并</div>
+        <div class="metric-value" :class="{ 'danger-text': (dashboard?.blockedMerges ?? 0) > 0 }">
+          {{ dashboard?.pendingMerges ?? 0 }}
+        </div>
+        <div class="metric-note">
+          {{ dashboard?.blockedMerges ?? 0 }} 个冲突待处置
+          <template v-if="dashboard?.validatingMerges"> · {{ dashboard.validatingMerges }} 个确认中断</template>
+        </div>
+      </RouterLink>
       <div class="metric">
         <div class="metric-label">下游依赖</div>
         <div class="metric-value">{{ dashboard?.dependencyCount ?? store.data.dependencies.length }}</div>

@@ -1050,6 +1050,7 @@ export const createSeedState = (): GovernanceState => ({
       evidence: 'RPT-INCIDENT-8821 / MOBILE-REL-2026-0819',
     },
   ],
+  merges: [],
   audit,
   currentVersion: '2026.10.0',
 })

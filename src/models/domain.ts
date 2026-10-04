@@ -34,6 +34,7 @@ export interface PlatformRule {
 export interface EventDefinition {
   id: string
   key: string
+  keyAliases?: string[]
   displayName: string
   category: string
   description: string
@@ -45,6 +46,7 @@ export interface EventDefinition {
   platformRules: PlatformRule[]
   scenarioIds: string[]
   downstreamDependencyIds: string[]
+  mergedIntoEventId?: string
   updatedAt: string
 }
 
@@ -155,6 +157,82 @@ export interface AuditEvent {
   createdAt: string
 }
 
+export type MergeStatus = 'draft' | 'pending' | 'confirming' | 'confirmed' | 'undone'
+export type MappingStatus = 'auto' | 'type_conflict' | 'resolved' | 'dropped'
+export type MergeResolution = 'cast' | 'drop' | ''
+export type MergeBlockerKind = 'type_conflict' | 'mapping_cycle' | 'unmapped_source'
+export type MergeCheckpointStep = 'backup' | 'aliases' | 'rewrite_refs' | 'scenarios' | 'source_retire' | 'finalize'
+
+export interface MergeFieldMapping {
+  id: string
+  sourcePropertyId: string
+  sourceName: string
+  sourceType: PropertyType
+  targetPropertyId: string | null
+  targetName: string | null
+  targetType: PropertyType | null
+  matchBasis: 'name' | 'synonym' | 'lineage' | 'manual' | 'none'
+  status: MappingStatus
+  resolution: MergeResolution
+  valueMapping: Array<{ from: string; to: string }>
+  castNote: string
+  note: string
+}
+
+export interface MergeBlocker {
+  kind: MergeBlockerKind
+  mappingId?: string
+  message: string
+}
+
+export interface MergeCheckpoint {
+  step: MergeCheckpointStep
+  done: boolean
+  startedAt: string
+  finishedAt?: string
+}
+
+export interface MergeReferenceBackup {
+  events: EventDefinition[]
+  dependencies: DownstreamDependency[]
+  scenarios: BusinessScenario[]
+  savedAt: string
+}
+
+export interface MergeReconciliation {
+  id: string
+  checkedAt: string
+  operator: string
+  expectedRefs: number
+  observedRefs: number
+  balanced: boolean
+  differences: string[]
+  archivedMapping: MergeFieldMapping[]
+  restored: boolean
+  note: string
+}
+
+export interface EventMerge {
+  id: string
+  pairKey: string
+  masterEventId: string
+  sourceEventId: string
+  status: MergeStatus
+  reason: string
+  operator: string
+  version: number
+  mappings: MergeFieldMapping[]
+  blockers: MergeBlocker[]
+  affectedDependencyIds: string[]
+  checkpoint?: MergeCheckpoint
+  backup?: MergeReferenceBackup
+  reconciliation?: MergeReconciliation
+  createdAt: string
+  updatedAt: string
+  confirmedAt?: string
+  undoneAt?: string
+}
+
 export interface GovernanceState {
   events: EventDefinition[]
   scenarios: BusinessScenario[]
@@ -163,6 +241,7 @@ export interface GovernanceState {
   releases: ReleaseCandidate[]
   deprecations: DeprecationPlan[]
   rollbacks: RollbackRecord[]
+  merges: EventMerge[]
   audit: AuditEvent[]
   currentVersion: string
 }

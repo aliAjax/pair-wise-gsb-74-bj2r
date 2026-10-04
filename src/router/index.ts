@@ -39,6 +39,11 @@ const router = createRouter({
           component: () => import('@/views/DeprecationView.vue'),
         },
         {
+          path: 'merges',
+          name: 'event-merges',
+          component: () => import('@/views/EventMergeView.vue'),
+        },
+        {
           path: 'rollbacks',
           name: 'rollbacks',
           component: () => import('@/views/RollbackView.vue'),
