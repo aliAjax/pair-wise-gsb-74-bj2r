@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   ErrorCircleIcon,
   FileSearchIcon,
+  GitMergeIcon,
   RefreshIcon,
 } from 'tdesign-icons-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -171,6 +172,28 @@ const pendingApprovals = computed(
               <span>{{ pendingMigrations.length }} 个下游依赖</span>
             </div>
           </div>
+          <RouterLink to="/merges" class="health-row health-link">
+            <span
+              class="health-icon"
+              :class="(dashboard?.mergeConflictCount ?? 0) > 0 ? 'warning' : 'neutral'"
+            >
+              <GitMergeIcon />
+            </span>
+            <div>
+              <strong>
+                事件合并
+                <t-tag
+                  v-if="(dashboard?.mergeConflictCount ?? 0) > 0"
+                  size="small"
+                  theme="danger"
+                  variant="light"
+                >
+                  {{ dashboard?.mergeConflictCount }} 个并发冲突
+                </t-tag>
+              </strong>
+              <span>{{ dashboard?.pendingMergeCount ?? 0 }} 份待处理或切换中</span>
+            </div>
+          </RouterLink>
           <div class="health-row">
             <span class="health-icon neutral"><FileSearchIcon /></span>
             <div>

@@ -39,3 +39,9 @@ export const useLineageQuery = () =>
     queryKey: ['lineage'],
     queryFn: governanceApi.getLineage,
   })
+
+export const useMergesQuery = () =>
+  useQuery({
+    queryKey: ['merges'],
+    queryFn: governanceApi.listMerges,
+  })

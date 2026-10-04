@@ -130,7 +130,9 @@ export const affectedDependencies = (
 
 export const validateGovernance = (state: GovernanceState): ValidationIssue[] => {
   const issues: ValidationIssue[] = []
-  const activeEvents = state.events.filter((event) => event.status !== 'retired')
+  const activeEvents = state.events.filter(
+    (event) => event.status !== 'retired' && !event.mergedIntoId,
+  )
 
   for (let index = 0; index < activeEvents.length; index += 1) {
     for (let cursor = index + 1; cursor < activeEvents.length; cursor += 1) {
@@ -356,3 +358,35 @@ export const propertyReferences = (
     const property = event.properties.find((item) => item.id === propertyId)
     return property ? [{ event, property }] : []
   })
+
+/**
+ * 合并后读路径解析：旧事件 id / 旧事件 key 都归一到主事件。
+ * 看板与查询改读主事件时复用该解析，旧键仅作为别名保留。
+ */
+export const resolveEvent = (
+  state: GovernanceState,
+  idOrKey: string,
+): EventDefinition | undefined => {
+  const direct = state.events.find(
+    (event) => event.id === idOrKey || event.key === idOrKey,
+  )
+  if (direct?.mergedIntoId) {
+    return state.events.find((event) => event.id === direct.mergedIntoId) ?? direct
+  }
+  if (direct) return direct
+  return state.events.find((event) =>
+    event.mergedKeyAliases?.some((alias) => alias.aliasKey === idOrKey),
+  )
+}
+
+/** 通过旧字段别名在主事件上定位字段（合并后读兼容） */
+export const resolveProperty = (
+  event: EventDefinition,
+  propertyNameOrAlias: string,
+): EventProperty | undefined =>
+  event.properties.find(
+    (property) =>
+      !property.deletedAt &&
+      (property.name === propertyNameOrAlias ||
+        property.mergeAliases?.includes(propertyNameOrAlias)),
+  )

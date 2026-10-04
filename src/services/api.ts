@@ -2,17 +2,19 @@ import axios, { type AxiosAdapter } from 'axios'
 import type {
   DownstreamDependency,
   EventDefinition,
+  EventMergeRecord,
   ReleaseCandidate,
   ValidationIssue,
 } from '@/models/domain'
 import { loadState } from '@/services/repository'
-import { validateGovernance } from '@/services/selectors'
+import { resolveEvent, validateGovernance } from '@/services/selectors'
 
 export interface EventListFilters {
   keyword?: string
   status?: string
   platform?: string
   category?: string
+  includeMerged?: boolean
 }
 
 export interface DashboardPayload {
@@ -21,6 +23,8 @@ export interface DashboardPayload {
   draftEventCount: number
   dependencyCount: number
   pendingMigrations: number
+  pendingMergeCount: number
+  mergeConflictCount: number
   validationIssueCount: number
   criticalIssueCount: number
   currentRelease: ReleaseCandidate | null
@@ -50,6 +54,10 @@ const localAdapter: AxiosAdapter = async (config) => {
       dependencyCount: state.dependencies.length,
       pendingMigrations:
         currentRelease?.migrationConfirmations.filter((item) => item.status === 'pending').length ?? 0,
+      pendingMergeCount: state.merges.filter(
+        (merge) => merge.status === 'pending' || merge.status === 'switching',
+      ).length,
+      mergeConflictCount: state.merges.filter((merge) => merge.status === 'conflict').length,
       validationIssueCount: issues.length,
       criticalIssueCount: issues.filter((issue) => issue.severity === 'critical').length,
       currentRelease,
@@ -81,7 +89,8 @@ const localAdapter: AxiosAdapter = async (config) => {
         textMatches &&
         platformMatches &&
         (!params.status || event.status === params.status) &&
-        (!params.category || event.category === params.category)
+        (!params.category || event.category === params.category) &&
+        (params.includeMerged || !event.mergedIntoId)
       )
     })
     return {
@@ -94,9 +103,33 @@ const localAdapter: AxiosAdapter = async (config) => {
   }
 
   if (url.startsWith('/events/')) {
-    const eventId = url.split('/')[2]
-    const data = state.events.find((event) => event.id === eventId)
-    if (!data) throw new Error(`事件不存在：${eventId}`)
+    const eventId = decodeURIComponent(url.split('/')[2] ?? '')
+    // 合并后：按旧事件 id 或旧键访问时统一解析到主事件
+    const resolved = resolveEvent(state, eventId)
+    if (!resolved) throw new Error(`事件不存在：${eventId}`)
+    return {
+      data: resolved,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }
+  }
+
+  if (url === '/merges') {
+    return {
+      data: state.merges,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }
+  }
+
+  if (url.startsWith('/merges/')) {
+    const mergeId = url.split('/')[2]
+    const data = state.merges.find((merge) => merge.id === mergeId)
+    if (!data) throw new Error(`合并记录不存在：${mergeId}`)
     return {
       data,
       status: 200,
@@ -190,6 +223,14 @@ export const governanceApi = {
   },
   getLineage: async (): Promise<LineagePayload> => {
     const response = await http.get<LineagePayload>('/lineage')
+    return response.data
+  },
+  listMerges: async (): Promise<EventMergeRecord[]> => {
+    const response = await http.get<EventMergeRecord[]>('/merges')
+    return response.data
+  },
+  getMerge: async (mergeId: string): Promise<EventMergeRecord> => {
+    const response = await http.get<EventMergeRecord>(`/merges/${mergeId}`)
     return response.data
   },
 }
